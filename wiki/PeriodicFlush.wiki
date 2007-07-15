@@ -1,4 +1,4 @@
-#How to implement delayed flush
+#summary How to implement delayed flush
 
 = Buffering writes for performance gain =
 
