@@ -27,6 +27,7 @@ local S_IFLNK = S_IFREG + S_IFCHR
 local ENOENT = -2
 local mem_block_size = 4096
 local blank_block=("0"):rep(mem_block_size)
+local open_mode={'rb','wb','rb+'}
 
 function string:splitpath() 
     local dir,file = self:match("(.-)([^:/\\]*)$") 
@@ -176,6 +177,7 @@ write=function(self, path, buf, offset, obj)
 end,
 
 open=function(self, path, mode)
+    local m = mode % 4
     local dirent = dir_walk(root, path)
     if not dirent then return ENOENT end
     return 0, dirent
@@ -337,7 +339,10 @@ end,
 access=function(...)
     return 0
 end,
-fsync = function(self, path, obj, isdatasync)
+fsync = function(self, path, isdatasync, obj)
+    return 0
+end,
+fsyncdir = function(self, path, isdatasync, obj)
     return 0
 end,
 listxattr = function(self, path, size)
