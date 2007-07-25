@@ -273,6 +273,21 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     return res;
 }
 
+static int xmp_fsyncdir(const char *path, int isdatasync, struct fuse_file_info *fi)
+{
+    int res;
+
+    LOAD_FUNC("syncdir")
+    lua_pushstring(L_VM, path);
+    lua_pushboolean(L_VM, isdatasync);
+    lua_rawgeti(L_VM, LUA_REGISTRYINDEX, fi->fh); 
+    obj_pcall(3, 1, 0);
+    err_pcall(res);
+    res = lua_tointeger(L_VM, -1);
+    EPILOGUE(1);
+    return res;
+}
+
 static int xmp_releasedir(const char *path, struct fuse_file_info *fi)
 {
     int res;
@@ -609,7 +624,7 @@ static int xmp_fsync(const char *path, int isdatasync,
 
     LOAD_FUNC("fsync")
     lua_pushstring(L_VM, path);
-    lua_pushnumber(L_VM, isdatasync);
+    lua_pushboolean(L_VM, isdatasync);
     lua_rawgeti(L_VM, LUA_REGISTRYINDEX, fi->fh); 
     obj_pcall(3, 1, 0);
     err_pcall(res);
@@ -702,6 +717,7 @@ static struct fuse_operations xmp_oper = {
     .readlink	= xmp_readlink,
     .readdir	= xmp_readdir,
     .opendir	= xmp_opendir,
+    .fsyncdir    = xmp_fsyncdir,
     .releasedir	= xmp_releasedir,
 #if 0
 #endif
@@ -752,6 +768,8 @@ static xmp_main(lua_State *L)
     int argc = lua_objlen(L, 2);
     char *argv[256];
     int i;
+    
+    if (argc < 2) luaL_error(L, "check parameter fusemount parameter table");
 
     #if 0
     lua_pushstring(L, "pulse_freq");
