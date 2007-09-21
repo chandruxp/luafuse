@@ -98,7 +98,10 @@ end,
 
 readdir = function(self, path, offset, dirent)
     local out={'.','..'}
-    for k,v in pairs(dirent.content) do out[#out+1]=k end
+    for k,v in pairs(dirent.content) do 
+        out[#out+1] = k
+        --out[#out+1]={d_name=k, ino = v.meta.ino, d_type = v.meta.mode, offset = 0}
+    end
     return 0, out
     --return 0, {{d_name="abc", ino = 1, d_type = S_IFREG + 7*S_UID, offset = 0}}
 end,
@@ -120,6 +123,7 @@ mknod = function(self, path, mode, rdev)
     if not dirent then
         local content = parent.content
         content[base]=o
+        parent.meta.nlink = parent.meta.nlink + 1
         return 0,o
     end
 end,
@@ -197,6 +201,7 @@ rmdir = function(self, path)
     local dir, base = path:splitpath()
     local dirent,parent = dir_walk(root, path)
     parent.content[base] = nil
+    parent.meta.nlink = parent.meta.nlink - 1
     return 0
 end,
 
@@ -214,6 +219,7 @@ mkdir = function(self, path, mode, ...)
     if not dirent then
         local content = parent.content
         content[base]=o
+        parent.meta.nlink = parent.meta.nlink + 1
     end
     return 0
 end,
@@ -231,6 +237,7 @@ create = function(self, path, mode, flag, ...)
     if not dirent then
         local content = parent.content
         content[base]=o
+        parent.meta.nlink = parent.meta.nlink + 1
         return 0,o
     end
 end,
@@ -260,6 +267,7 @@ symlink=function(self, from, to)
     if not dirent then
         local content = parent.content
         content[base]=o
+        parent.meta.nlink = parent.meta.nlink + 1
         return 0
     end
 end,
@@ -271,7 +279,9 @@ rename = function(self, from, to)
     local n_dirent,tp = dir_walk(root, to)
     if dirent and not n_dirent then
         tp.content[base]=dirent
+        tp.meta.nlink = tp.meta.nlink + 1
         fp.content[o_base]=nil
+        fp.meta.nlink = fp.meta.nlink - 1
         return 0
     end
 end,
@@ -282,6 +292,7 @@ link=function(self, from, to, ...)
     local n_dirent,tp = dir_walk(root, to)
     if dirent and not n_dirent then
         tp.content[base]=dirent
+        tp.meta.nlink = tp.meta.nlink + 1
         dirent.meta.nlink = dirent.meta.nlink + 1
         return 0
     end
@@ -293,6 +304,7 @@ unlink=function(self, path, ...)
     local meta = dirent.meta
     local content = parent.content
     parent.content[base] = nil
+    parent.meta.nlink = parent.meta.nlink - 1
     meta.nlink = meta.nlink - 1
     clear_buffer(dirent, 0, floor(dirent.meta.size/mem_block_size))
     dirent.content = nil
