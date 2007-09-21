@@ -184,6 +184,7 @@ open=function(self, path, mode)
 end,
 
 release=function(self, path, obj)
+    if obj.bs then obj.bs:close() end
     return 0
 end,
 
@@ -366,5 +367,10 @@ end
 }
 
 fuse_opt = { 'memfs', 'mnt', '-f', '-s', '-oallow_other'}
+
+if select('#', ...) < 2 then
+    print(string.format("Usage: %s <fsname> <mount point>", arg[0]))
+    os.exit(1)
+end
 
 fuse.main(memfs, {...})
