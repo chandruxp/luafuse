@@ -346,10 +346,12 @@ utime=function(self, path, atime, mtime)
     return 0
 end,
 ftruncate = function(self, path, size, obj)
-    local old_size = obj.meta.size
-    obj.meta.size = size
-    clear_buffer(dirent, floor(size/mem_block_size), floor(old_size/mem_block_size))
-    return 0
+    if obj then
+        local old_size = obj.meta.size
+        obj.meta.size = size
+        clear_buffer(obj, floor(size/mem_block_size), floor(old_size/mem_block_size))
+        return 0
+    end
 end,
 truncate=function(self, path, size)
     local dirent,parent = dir_walk(root, path)
