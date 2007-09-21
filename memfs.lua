@@ -26,7 +26,7 @@ local S_IFBLK = 6*2^12
 local S_IFREG = 2^15
 local S_IFLNK = S_IFREG + S_IFCHR
 local ENOENT = -2
-local mem_block_size = 4096
+local mem_block_size = 4096 --this seems to be the optimal size for speed and memory
 local blank_block=("0"):rep(mem_block_size)
 local open_mode={'rb','wb','rb+'}
 
