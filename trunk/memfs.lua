@@ -15,9 +15,10 @@ local format = string.format
 local now = os.time
 local difftime = os.difftime
 
-local S_GID = 2^3
-local S_UID = 2^6
-local S_SID = 2^9
+local S_WID = 1 --world
+local S_GID = 2^3 --group
+local S_UID = 2^6 --owner
+local S_SID = 2^9 --sticky bits etc.
 local S_IFIFO = 1*2^12
 local S_IFCHR = 2*2^12
 local S_IFDIR = 4*2^12
@@ -29,9 +30,15 @@ local mem_block_size = 4096
 local blank_block=("0"):rep(mem_block_size)
 local open_mode={'rb','wb','rb+'}
 
+
 function string:splitpath() 
     local dir,file = self:match("(.-)([^:/\\]*)$") 
     return dir:match("(.-)[/\\]?$"), file
+end
+
+local function is_dir(mode)
+    local o = ((mode - mode % S_IFDIR)/S_IFDIR) % 2
+    return o ~= 0
 end
 
 local function clear_buffer(dirent,from,to)
@@ -100,6 +107,7 @@ readdir = function(self, path, offset, dirent)
     local out={'.','..'}
     for k,v in pairs(dirent.content) do 
         out[#out+1] = k
+
         --out[#out+1]={d_name=k, ino = v.meta.ino, d_type = v.meta.mode, offset = 0}
     end
     return 0, out
@@ -305,12 +313,15 @@ unlink=function(self, path, ...)
     local content = parent.content
     parent.content[base] = nil
     parent.meta.nlink = parent.meta.nlink - 1
-    meta.nlink = meta.nlink - 1
-    clear_buffer(dirent, 0, floor(dirent.meta.size/mem_block_size))
-    dirent.content = nil
-    dirent.meta = nil
+    meta.nlink = meta.nlink - 1 - (is_dir(meta.mode) and 1 or 0)
+    if meta.nlink == 0 then
+        clear_buffer(dirent, 0, floor(dirent.meta.size/mem_block_size))
+        dirent.content = nil
+        dirent.meta = nil
+    end
     return 0
 end,
+
 chown=function(self, path, uid, gid)
     local dirent,parent = dir_walk(root, path)
     if dirent then
