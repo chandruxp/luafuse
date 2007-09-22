@@ -79,7 +79,7 @@ local root=
         mode= mk_mode(7,5,5) + S_IFDIR, 
         ino = 0, 
         dev = 0, 
-        nlink = 2, uid = uid, gid = gid, size = 0, atime = 0, mtime = 0, ctime = 0}
+        nlink = 2, uid = 0, gid = 0, size = 0, atime = now(), mtime = now(), ctime = now()}
         ,
  content = {}
 }
@@ -196,7 +196,6 @@ open=function(self, path, mode)
 end,
 
 release=function(self, path, obj)
-    if obj.bs then obj.bs:close() end
     return 0
 end,
 
@@ -270,7 +269,7 @@ symlink=function(self, from, to)
         mode= S_IFLNK+mk_mode(7,7,7),
         ino = 0, 
         dev = 0, 
-        nlink = 1, uid = uid, gid = gid, size = 0, atime = 0, mtime = 0, ctime = 0}
+        nlink = 1, uid = uid, gid = gid, size = 0, atime = now(), mtime = now(), ctime = now()}
     local o = { meta=x, content=from }
     if not dirent then
         local content = parent.content
@@ -327,40 +326,47 @@ chown=function(self, path, uid, gid)
     if dirent then
         dirent.meta.uid = uid
         dirent.meta.gid = gid
+        return 0
+    else
+        return ENOENT
     end
-    return 0
 end,
 chmod=function(self, path, mode)
     local dirent,parent = dir_walk(root, path)
     if dirent then
         dirent.meta.mode = mode
+        return 0
+    else
+        return ENOENT
     end
-    return 0
 end,
 utime=function(self, path, atime, mtime)
     local dirent,parent = dir_walk(root, path)
     if dirent then
         dirent.meta.atime = atime
         dirent.meta.mtime = mtime
+        return 0
+    else
+        return ENOENT
     end
-    return 0
 end,
 ftruncate = function(self, path, size, obj)
-    if obj then
-        local old_size = obj.meta.size
-        obj.meta.size = size
-        clear_buffer(obj, floor(size/mem_block_size), floor(old_size/mem_block_size))
-        return 0
-    end
+    local old_size = obj.meta.size
+    obj.meta.size = size
+    clear_buffer(obj, floor(size/mem_block_size), floor(old_size/mem_block_size))
+    return 0
 end,
+
 truncate=function(self, path, size)
     local dirent,parent = dir_walk(root, path)
     if dirent then 
         local old_size = dirent.meta.size
         dirent.meta.size = size
         clear_buffer(dirent, floor(size/mem_block_size), floor(old_size/mem_block_size))
+        return 0
+    else
+        return ENOENT
     end
-    return 0
 end,
 access=function(...)
     return 0
