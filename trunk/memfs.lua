@@ -219,8 +219,7 @@ mkdir = function(self, path, mode, ...)
     local dirent,parent = dir_walk(root, path)
     local uid,gid,pid = fuse.context()
     local x = {
-        --mode= S_IFDIR + 6*S_UID, 
-        mode = mode+S_IFDIR,
+        mode = mode+S_IFDIR, -- mode don't have directory bit set
         ino = 0, 
         dev = 0, 
         nlink = 2, uid = uid, gid = gid, size = 0, atime = now(), mtime = now(), ctime = now()}
@@ -402,7 +401,7 @@ end
 fuse_opt = { 'memfs', 'mnt', '-f', '-s', '-oallow_other'}
 
 if select('#', ...) < 2 then
-    print(string.format("Usage: %s <fsname> <mount point>", arg[0]))
+    print(string.format("Usage: %s <fsname> <mount point> [fuse mount options]", arg[0]))
     os.exit(1)
 end
 
