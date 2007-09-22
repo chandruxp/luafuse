@@ -56,8 +56,8 @@ end
 local function dir_walk(root, path)
     if path == "/" then 
         local uid,gid,pid = fuse.context()
-        root.meta.uid = uid
-        root.meta.gid = gid
+        --root.meta.uid = uid
+        --root.meta.gid = gid
         return root 
     end
     local dirent = root
@@ -73,13 +73,15 @@ local function dir_walk(root, path)
     return dirent,parent
 end
 
+local uid,gid,pid,puid = fuse.context()
+
 local root=
 {
  meta = {
         mode= mk_mode(7,5,5) + S_IFDIR, 
         ino = 0, 
         dev = 0, 
-        nlink = 2, uid = 0, gid = 0, size = 0, atime = now(), mtime = now(), ctime = now()}
+        nlink = 2, uid = puid, gid = puid, size = 0, atime = now(), mtime = now(), ctime = now()}
         ,
  content = {}
 }
