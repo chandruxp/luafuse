@@ -73,7 +73,7 @@ local function dir_walk(root, path)
     return dirent,parent
 end
 
-local uid,gid,pid,puid = fuse.context()
+local uid,gid,pid,puid,pgid = fuse.context()
 
 local root=
 {
@@ -81,7 +81,7 @@ local root=
         mode= mk_mode(7,5,5) + S_IFDIR, 
         ino = 0, 
         dev = 0, 
-        nlink = 2, uid = puid, gid = puid, size = 0, atime = now(), mtime = now(), ctime = now()}
+        nlink = 2, uid = puid, gid = pgid, size = 0, atime = now(), mtime = now(), ctime = now()}
         ,
  content = {}
 }

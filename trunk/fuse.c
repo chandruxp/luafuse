@@ -831,9 +831,10 @@ static int xmp_get_context(lua_State *L)
     lua_pushnumber(L, fc->uid);
     lua_pushnumber(L, fc->gid);
     lua_pushnumber(L, fc->pid);
-    lua_pushnumber(L, getuid());
+    lua_pushnumber(L, geteuid());
+    lua_pushnumber(L, getegid());
 
-    return 4;
+    return 5;
 }
 
 static const luaL_reg Rm[] = {
