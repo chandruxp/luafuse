@@ -7,6 +7,7 @@
 ]]
 
 local fuse = require 'fuse'
+local mnode = require 'mnode'
 
 local tjoin = table.concat
 local tadd = table.insert
@@ -26,6 +27,9 @@ local S_IFBLK = 6*2^12
 local S_IFREG = 2^15
 local S_IFLNK = S_IFREG + S_IFCHR
 local ENOENT = -2
+local ENOSYS = -38
+local ENOATTR = -516
+local ENOTSUPP = -524
 local mem_block_size = 4096 --this seems to be the optimal size for speed and memory
 local blank_block=("0"):rep(mem_block_size)
 local open_mode={'rb','wb','rb+'}
@@ -39,6 +43,7 @@ end
 local tab = {  -- tab[i+1][j+1] = xor(i, j) where i,j in (0-15)
   {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, },
   {1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14, },
+
   {2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9, 14, 15, 12, 13, },
   {3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12, },
   {4, 5, 6, 7, 0, 1, 2, 3, 12, 13, 14, 15, 8, 9, 10, 11, },
@@ -85,10 +90,25 @@ local function is_dir(mode)
     return o ~= 0
 end
 
+local function decode_acl(s)
+    local version = s:sub(1,4)
+    local n = 5
+    while true do
+        local tag = s:sub(n, n + 1)
+        local perm = s:sub(n + 2, n + 3)
+        local id = s:sub(n + 4, n + 7)
+        n = n + 8
+        if n >= #s then break end
+    end
+end
+
 local function clear_buffer(dirent,from,to)
+    for i = from, to do dirent.content[i] = nil end 
+    --[[
     if type(dirent.content) == "table" then
         for i=from,to do dirent.content[i] = nil end
     end
+    ]]
     collectgarbage("collect")
 end
 
@@ -98,37 +118,54 @@ local function mk_mode(owner, group, world, sticky)
 end
 
 local function dir_walk(root, path)
-    if path == "/" then 
-        local uid,gid,pid = fuse.context()
-        --root.meta.uid = uid
-        --root.meta.gid = gid
-        return root 
-    end
-    local dirent = root
-    local parent
-    for c in path:gmatch("[^/]*") do
-        if #c > 0 then
-            parent = dirent
-            local content = parent.content
-            dirent = content[c]
+    local dirent , parent = root, nil
+    if path ~= "/" then 
+        for c in path:gmatch("[^/]*") do
+            if #c > 0 then
+                parent = dirent
+                local content = parent.content
+                --dirent = content[c]
+                dirent = mnode.get(content[c])
+            end
+            if not dirent then return nil, parent end
         end
-        if not dirent then return nil, parent end
     end
-    return dirent,parent
+    if true or not dirent.content then dirent.content = mnode.get_block(dirent.meta.data_block) end
+    return dirent, parent
 end
 
 local uid,gid,pid,puid,pgid = fuse.context()
 
-local root=
-{
- meta = {
-        mode= mk_mode(7,5,5) + S_IFDIR, 
-        ino = 0, 
-        dev = 0, 
-        nlink = 2, uid = puid, gid = pgid, size = 0, atime = now(), mtime = now(), ctime = now()}
-        ,
- content = {}
-}
+local root = mnode.get("/")
+
+if not root then
+    local content = mnode.block()
+    root = mnode.node{
+     meta = {
+            data_block = content._key,
+            xattr={},
+            mode= mk_mode(7,5,5) + S_IFDIR, 
+            ino = 0, 
+            dev = 0, 
+            nlink = 2, uid = puid, gid = pgid, size = 0, atime = now(), mtime = now(), ctime = now()}
+            ,
+            content = content
+    }
+    mnode.set("/", root)
+end
+
+local function unlink_node(dirent)
+    local meta = dirent.meta
+    meta.nlink = meta.nlink - 1 - (is_dir(meta.mode) and 1 or 0)
+    if meta.nlink == 0 then
+        clear_buffer(dirent, 0, floor(dirent.meta.size/mem_block_size))
+        dirent.content = nil
+        dirent.meta = nil
+        mnode.set(dirent._key, nil)
+    else
+        if (dirent.open or 0) < 1 then mnode.flush_node(dirent, path, true) end
+    end
+end
 
 local memfs={
 
@@ -151,7 +188,7 @@ end,
 
 readdir = function(self, path, offset, dirent)
     local out={'.','..'}
-    for k,v in pairs(dirent.content) do 
+    for k,v in dirent.content do 
         out[#out+1] = k
 
         --out[#out+1]={d_name=k, ino = v.meta.ino, d_type = v.meta.mode, offset = 0}
@@ -168,16 +205,21 @@ mknod = function(self, path, mode, rdev)
     local dir, base = path:splitpath()
     local dirent,parent = dir_walk(root, path)
     local uid,gid,pid = fuse.context()
+    local content = mnode.block()
     local x = {
+        data_block = content._key,
+        xattr={},
         mode = mode,
         ino = 0, 
         dev = rdev, 
         nlink = 1, uid = uid, gid = gid, size = 0, atime = now(), mtime = now(), ctime = now()}
-    local o = { meta=x, content={}}
+    local o = mnode.node{ meta=x , content = content}
     if not dirent then
         local content = parent.content
-        content[base]=o
+        content[base]=o._key
         parent.meta.nlink = parent.meta.nlink + 1
+        mnode.flush_node(parent, dir, true)
+        mnode.flush_node(o, path, true)
         return 0,o
     end
 end,
@@ -238,10 +280,25 @@ open=function(self, path, mode)
     local m = mode % 4
     local dirent = dir_walk(root, path)
     if not dirent then return ENOENT end
+    dirent.open = (dirent.open or 0) + 1
     return 0, dirent
 end,
 
 release=function(self, path, obj)
+    local dir, base = path:splitpath()
+    obj.open = obj.open - 1
+    if obj.open < 1 then
+        local final_key = mnode.flush_data(obj.content, path, true)
+        if final_key and final_key ~= obj.data_block then obj.data_block = final_key end
+        mnode.flush_node(obj, path, true)
+        if obj.parent then 
+            if final_key and final_key ~= obj.data_block then 
+                parent.content[base] = final_key 
+            end
+            mnode.flush_node(obj.parent, dir, true) 
+        end
+        obj.parent = nil
+    end
     return 0
 end,
 
@@ -253,8 +310,9 @@ end,
 rmdir = function(self, path)
     local dir, base = path:splitpath()
     local dirent,parent = dir_walk(root, path)
-    parent.content[base] = nil
+    parent.content[base] = nil; mnode.set(dirent._key, nil)
     parent.meta.nlink = parent.meta.nlink - 1
+    mnode.flush_node(parent, dir, true)
     return 0
 end,
 
@@ -262,16 +320,21 @@ mkdir = function(self, path, mode, ...)
     local dir, base = path:splitpath()
     local dirent,parent = dir_walk(root, path)
     local uid,gid,pid = fuse.context()
+    local content = mnode.block()
     local x = {
+        data_block = content._key,
+        xattr = {},
         mode = set_bits(mode,S_IFDIR), -- mode don't have directory bit set
         ino = 0, 
         dev = 0, 
         nlink = 2, uid = uid, gid = gid, size = 0, atime = now(), mtime = now(), ctime = now()}
-    local o = { meta=x, content={} }
+    local o = mnode.node{ meta=x , content = content}
     if not dirent then
         local content = parent.content
-        content[base]=o
+        content[base]=o._key
         parent.meta.nlink = parent.meta.nlink + 1
+        mnode.flush_node(parent, dir, true)
+        mnode.flush_node(o, path, true)
     end
     return 0
 end,
@@ -280,28 +343,35 @@ create = function(self, path, mode, flag, ...)
     local dir, base = path:splitpath()
     local dirent,parent = dir_walk(root, path)
     local uid,gid,pid = fuse.context()
+    local content = mnode.block()
     local x = {
+        data_block = content._key,
+        xattr={},
         mode = set_bits(mode, S_IFREG),
         ino = 0, 
         dev = 0, 
         nlink = 1, uid = uid, gid = gid, size = 0, atime = now(), mtime = now(), ctime = now()}
-    local o = { meta=x, content={}}
+    local o = mnode.node{ meta=x , content = content }
     if not dirent then
         local content = parent.content
-        content[base]=o
+        content[base]=o._key
         parent.meta.nlink = parent.meta.nlink + 1
+        mnode.flush_node(parent, dir)
+        o.parent = parent
+        o.open = 1
         return 0,o
     end
 end,
 
 flush=function(self, path, obj)
+    mnode.flush_data(obj.content, path)
     return 0
 end,
 
 readlink=function(self, path)
     local dirent,parent = dir_walk(root, path)
     if dirent then
-        return 0, dirent.content
+        return 0, dirent.content[1]
     end
     return ENOENT
 end,
@@ -310,59 +380,78 @@ symlink=function(self, from, to)
     local dir, base = to:splitpath()
     local dirent,parent = dir_walk(root, to)
     local uid,gid,pid = fuse.context()
+    local content = mnode.block()
     local x = {
+        data_block = content._key,
+        xattr={},
         mode= S_IFLNK+mk_mode(7,7,7),
         ino = 0, 
         dev = 0, 
         nlink = 1, uid = uid, gid = gid, size = 0, atime = now(), mtime = now(), ctime = now()}
-    local o = { meta=x, content=from }
+    local o = mnode.node{ meta=x , content = content}
+    o.content[1] = from
     if not dirent then
         local content = parent.content
-        content[base]=o
+        content[base]=o._key
         parent.meta.nlink = parent.meta.nlink + 1
+        mnode.flush_node(parent, dir, true)
+        mnode.flush_node(o, to, true)
         return 0
     end
 end,
 
 rename = function(self, from, to)
-    local dir, o_base = from:splitpath()
-    local dir, base = to:splitpath()
+    if from == to then return 0 end
+
+    --print("rename", from, to)
+    local dir_f, o_base = from:splitpath()
+    local dir_t, base = to:splitpath()
     local dirent,fp = dir_walk(root, from)
     local n_dirent,tp = dir_walk(root, to)
-    if dirent and not n_dirent then
-        tp.content[base]=dirent
-        tp.meta.nlink = tp.meta.nlink + 1
+    if dirent then
+        tp.content[base]=dirent._key
+        if n_dirent then 
+            unlink_node(n_dirent) 
+        else
+            tp.meta.nlink = tp.meta.nlink + 1 
+        end
+        mnode.flush_node(tp, dir, true)
+
         fp.content[o_base]=nil
-        fp.meta.nlink = fp.meta.nlink - 1
+        fp.meta.nlink = tp.meta.nlink - 1
+        mnode.flush_node(fp, dir, true)
+
+        if (dirent.open or 0) < 1 then mnode.flush_node(dirent,to, true) end
         return 0
     end
 end,
 
 link=function(self, from, to, ...)
+    --print("link", from, to)
     local dir, base = to:splitpath()
     local dirent,fp = dir_walk(root, from)
     local n_dirent,tp = dir_walk(root, to)
-    if dirent and not n_dirent then
-        tp.content[base]=dirent
+    if dirent then
+        tp.content[base]=dirent._key
         tp.meta.nlink = tp.meta.nlink + 1
+        mnode.flush_node(tp, dir, true)
         dirent.meta.nlink = dirent.meta.nlink + 1
+        if (dirent.open or 0) < 1 then mnode.flush_node(dirent,to, true) end
+        if n_dirent then unlink_node(n_dirent) end
         return 0
     end
 end,
 
 unlink=function(self, path, ...)
+    --print("unlink", path)
     local dir, base = path:splitpath()
     local dirent,parent = dir_walk(root, path)
     local meta = dirent.meta
     local content = parent.content
     parent.content[base] = nil
     parent.meta.nlink = parent.meta.nlink - 1
-    meta.nlink = meta.nlink - 1 - (is_dir(meta.mode) and 1 or 0)
-    if meta.nlink == 0 then
-        clear_buffer(dirent, 0, floor(dirent.meta.size/mem_block_size))
-        dirent.content = nil
-        dirent.meta = nil
-    end
+    mnode.flush_node(parent, dir, true)
+    unlink_node(dirent)
     return 0
 end,
 
@@ -371,6 +460,7 @@ chown=function(self, path, uid, gid)
     if dirent then
         dirent.meta.uid = uid
         dirent.meta.gid = gid
+        if (dirent.open or 0) < 1 then mnode.flush_node(dirent, path, true) end
         return 0
     else
         return ENOENT
@@ -380,6 +470,7 @@ chmod=function(self, path, mode)
     local dirent,parent = dir_walk(root, path)
     if dirent then
         dirent.meta.mode = mode
+        if (dirent.open or 0) < 1 then mnode.flush_node(dirent, path, true) end
         return 0
     else
         return ENOENT
@@ -390,6 +481,7 @@ utime=function(self, path, atime, mtime)
     if dirent then
         dirent.meta.atime = atime
         dirent.meta.mtime = mtime
+        if (dirent.open or 0) < 1 then mnode.flush_node(dirent, path, true) end
         return 0
     else
         return ENOENT
@@ -408,6 +500,7 @@ truncate=function(self, path, size)
         local old_size = dirent.meta.size
         dirent.meta.size = size
         clear_buffer(dirent, floor(size/mem_block_size), floor(old_size/mem_block_size))
+        if (dirent.open or 0) < 1 then mnode.flush_node(dirent, path, true) end
         return 0
     else
         return ENOENT
@@ -417,22 +510,55 @@ access=function(...)
     return 0
 end,
 fsync = function(self, path, isdatasync, obj)
+    if isdatasync then mnode.flush_node(obj, path) 
+    else mnode.flush_data(obj.content, path) end
     return 0
 end,
 fsyncdir = function(self, path, isdatasync, obj)
     return 0
 end,
 listxattr = function(self, path, size)
-    return 0, "attr1\0attr2\0attr3\0\0"
+    local dirent,parent = dir_walk(root, path)
+    if dirent then
+        --return 0, "attr1\0attr2\0attr3\0"
+        --return 0, "" --no attributes
+        local v={}
+        for k in pairs(dirent.meta.xattr) do v[#v+1]=k end
+        --return 0, table.concat(v,"\0") .. "\0"
+        return 0, table.concat(v,"\0") .. "\0"
+    else
+        return ENOENT
+    end
 end,
+
 removexattr = function(self, path, name)
-    return 0
+    local dirent,parent = dir_walk(root, path)
+    if dirent then
+        dirent.meta.xattr[name] = nil
+        return 0
+    else
+        return ENOENT
+    end
 end,
-setxattr = function(self, path, name, val)
-    return 0
+
+setxattr = function(self, path, name, val, flags)
+    --string.hex = function(s) return s:gsub(".", function(c) return format("%02x", string.byte(c)) end) end
+    local dirent,parent = dir_walk(root, path)
+    if dirent then
+        dirent.meta.xattr[name]=val
+        return 0
+    else
+        return ENOENT
+    end
 end,
-getxattr = function(self, path, name)
-    return 0, "attr"
+
+getxattr = function(self, path, name, size)
+    local dirent,parent = dir_walk(root, path)
+    if dirent then
+        return 0, dirent.meta.xattr[name] or "" --not found is empty string
+    else
+        return ENOENT
+    end
 end,
 
 statfs = function(self,path)

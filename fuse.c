@@ -672,7 +672,7 @@ static int xmp_getxattr(const char *path, const char *name, char *value,
     if (o) memcpy(value, o, min(l,size));
     EPILOGUE(2);
 
-    return o ? min(l,size) : res;
+    return o ? (size > 0  ? min(l,size) : l) : res;
 }
 
 static int xmp_listxattr(const char *path, char *list, size_t size)
@@ -691,7 +691,7 @@ static int xmp_listxattr(const char *path, char *list, size_t size)
     if (o) memcpy(list, o, min(l,size));
     EPILOGUE(2);
 
-    return o ? min(l,size) : res;
+    return o ? (size > 0  ? min(l,size) : l) : res;
 }
 
 static int xmp_removexattr(const char *path, const char *name)
