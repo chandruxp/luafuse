@@ -10,6 +10,7 @@ MYNAME= fuse
 # no need to change anything below here except if your gcc/glibc is not
 # standard
 CFLAGS= $(INCS) $(DEFS) $(WARN) -O2 $G -D_FILE_OFFSET_BITS=64 -D_REENTRANT -DFUSE_USE_VERSION=25 -DHAVE_SETXATTR
+#CFLAGS= $(INCS) $(DEFS) $(WARN) -O2 $G -D_FILE_OFFSET_BITS=64 -D_REENTRANT -DFUSE_USE_VERSION=25 
 WARN= #-ansi -pedantic -Wall
 INCS= -I$(LUAINC) -I$(MD5INC)
 LIBS= -lfuse -llua5.1
