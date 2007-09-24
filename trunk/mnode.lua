@@ -16,12 +16,10 @@ function get_block(key)
 end
 
 function flush_node(node, path, final)
-    --print('flush_node', path, final)
     return true
 end
 
-function flush_data(block, path, final)
-    if path:find('git') then print('flush_data', path, final) end
+function flush_data(block, node, path, final)
     return true
 end
 
